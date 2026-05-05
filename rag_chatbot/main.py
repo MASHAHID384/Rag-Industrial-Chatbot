@@ -1451,6 +1451,8 @@ def init_session_state() -> None:
         st.session_state.file_status = {}
     if "last_upload_signature" not in st.session_state:
         st.session_state.last_upload_signature = tuple()
+    if "mobile_uploader_nonce" not in st.session_state:
+        st.session_state.mobile_uploader_nonce = 0
 
 
 def main() -> None:
@@ -1496,14 +1498,26 @@ def main() -> None:
     with control_right:
         if mobile_client:
             st.caption("Mobile upload mode: upload one file at a time for best reliability.")
+            st.caption("Chrome tip: pick files from Downloads/Files, and keep filename in English.")
             uploaded_single = st.file_uploader(
                 "📂 Tap to browse files",
-                type=SUPPORTED_TYPES,
+                type=None,
                 accept_multiple_files=False,
                 help="Mobile tip: use English file names and upload one file at a time.",
-                key="mobile_file_uploader",
+                key=f"mobile_file_uploader_{st.session_state.mobile_uploader_nonce}",
             )
-            uploaded_files = [uploaded_single] if uploaded_single else []
+            if uploaded_single:
+                ext = Path(uploaded_single.name).suffix.lower().replace(".", "").strip()
+                if ext not in SUPPORTED_TYPES:
+                    st.error(
+                        f"Unsupported file type on mobile: .{ext or 'unknown'}. "
+                        f"Allowed: {', '.join(SUPPORTED_TYPES).upper()}"
+                    )
+                    uploaded_files = []
+                else:
+                    uploaded_files = [uploaded_single]
+            else:
+                uploaded_files = []
         else:
             uploaded_files = st.file_uploader(
                 "📂 Drag and drop files here or browse files",
@@ -1522,6 +1536,11 @@ def main() -> None:
             st.success(
                 f"Auto-processed {processed} file(s), failed {failed}. Context: {len(st.session_state.uploaded_file_names)} files / {len(st.session_state.data)} chunks."
             )
+        # Reset mobile uploader after each processing cycle to avoid
+        # stuck/error UI state in some Android Chrome sessions.
+        if mobile_client and processed > 0:
+            st.session_state.mobile_uploader_nonce += 1
+            st.rerun()
 
     if uploaded_files:
         selected_names = [file.name for file in uploaded_files]
