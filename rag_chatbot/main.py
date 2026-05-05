@@ -1,7 +1,11 @@
 ﻿import json
+import io
 import os
 import re
 import time
+import urllib.parse
+import urllib.request
+from email.message import Message
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -25,6 +29,7 @@ MAX_CONTEXT_CHUNKS = 6
 MAX_API_RETRIES = 3
 API_KEY_ERROR_PATTERNS = ["API_KEY_INVALID", "key expired", "api key expired", "invalid api key"]
 MAX_CHUNKS_PER_FILE = 2
+MAX_URL_FILE_SIZE_MB = 30
 
 
 def apply_ui_styles() -> None:
@@ -1286,6 +1291,108 @@ def merge_uploaded_chunks(existing: List[Dict], incoming: List[Dict]) -> List[Di
     return retained + incoming
 
 
+def _resolve_url_to_download_link(raw_url: str) -> str:
+    url = (raw_url or "").strip()
+    parsed = urllib.parse.urlparse(url)
+    host = parsed.netloc.lower()
+
+    if "drive.google.com" in host:
+        path = parsed.path
+        query = urllib.parse.parse_qs(parsed.query)
+        file_id = ""
+        match = re.search(r"/file/d/([^/]+)/", path)
+        if match:
+            file_id = match.group(1)
+        elif "id" in query and query["id"]:
+            file_id = query["id"][0]
+        elif "/uc" in path and "id" in query and query["id"]:
+            file_id = query["id"][0]
+
+        if file_id:
+            return f"https://drive.google.com/uc?export=download&id={file_id}"
+    return url
+
+
+def _filename_from_headers_or_url(url: str, headers) -> str:
+    message = Message()
+    content_disposition = headers.get("Content-Disposition", "")
+    if content_disposition:
+        message["content-disposition"] = content_disposition
+        guessed = message.get_filename()
+        if guessed:
+            return Path(guessed).name
+
+    path_name = Path(urllib.parse.urlparse(url).path).name
+    return path_name or "url_document"
+
+
+def _content_type_to_ext(content_type: str) -> str:
+    lowered = (content_type or "").lower()
+    if "pdf" in lowered:
+        return "pdf"
+    if "json" in lowered:
+        return "json"
+    if "xml" in lowered:
+        return "xml"
+    if "csv" in lowered:
+        return "csv"
+    if "plain" in lowered or "text/" in lowered:
+        return "txt"
+    if "wordprocessingml" in lowered or "application/msword" in lowered:
+        return "docx"
+    return ""
+
+
+def download_url_as_file(raw_url: str):
+    if not raw_url or not raw_url.strip():
+        raise ValueError("Please paste a valid file URL.")
+
+    download_url = _resolve_url_to_download_link(raw_url)
+    req = urllib.request.Request(
+        download_url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
+            )
+        },
+    )
+
+    max_bytes = MAX_URL_FILE_SIZE_MB * 1024 * 1024
+    with urllib.request.urlopen(req, timeout=40) as response:
+        headers = response.headers
+        content_type = headers.get("Content-Type", "")
+        content_length = int(headers.get("Content-Length", "0") or 0)
+        if content_length and content_length > max_bytes:
+            raise ValueError(
+                f"File is too large ({round(content_length / (1024*1024), 1)}MB). "
+                f"URL upload limit is {MAX_URL_FILE_SIZE_MB}MB."
+            )
+        payload = response.read(max_bytes + 1)
+
+    if len(payload) > max_bytes:
+        raise ValueError(f"File is too large. URL upload limit is {MAX_URL_FILE_SIZE_MB}MB.")
+
+    file_name = _filename_from_headers_or_url(download_url, headers)
+    ext = Path(file_name).suffix.lower().replace(".", "").strip()
+    if ext not in SUPPORTED_TYPES:
+        guessed_ext = _content_type_to_ext(content_type)
+        if guessed_ext:
+            base_name = Path(file_name).stem or "url_document"
+            file_name = f"{base_name}.{guessed_ext}"
+            ext = guessed_ext
+
+    if ext not in SUPPORTED_TYPES:
+        raise ValueError(
+            f"Unsupported URL file type. Allowed types: {', '.join(SUPPORTED_TYPES).upper()}."
+        )
+
+    file_obj = io.BytesIO(payload)
+    file_obj.name = file_name
+    file_obj.size = len(payload)
+    return file_obj
+
+
 def get_upload_signature(uploaded_files) -> tuple[str, ...]:
     if not uploaded_files:
         return tuple()
@@ -1531,6 +1638,17 @@ def main() -> None:
                 help="Supported: PDF, TXT, XML, DOCX, JSON, CSV",
                 key="desktop_file_uploader",
             )
+        st.caption("Or paste a file URL (Google Drive link supported).")
+        url_col_text, url_col_btn = st.columns([4, 1])
+        with url_col_text:
+            url_input = st.text_input(
+                "Document URL",
+                placeholder="https://drive.google.com/file/d/... or direct PDF link",
+                label_visibility="collapsed",
+                key="url_upload_input",
+            )
+        with url_col_btn:
+            url_upload_clicked = st.button("Add URL", use_container_width=True)
 
     upload_signature = get_upload_signature(uploaded_files)
     if upload_signature and upload_signature != st.session_state.last_upload_signature:
@@ -1546,6 +1664,29 @@ def main() -> None:
         if safe_mobile_mode and processed > 0:
             st.session_state.mobile_uploader_nonce += 1
             st.rerun()
+
+    if url_upload_clicked:
+        if not (url_input or "").strip():
+            st.warning("Please paste a file URL first.")
+        else:
+            try:
+                with st.spinner("Downloading and processing URL file..."):
+                    url_file = download_url_as_file(url_input.strip())
+                    processed, failed = process_uploaded_files([url_file])
+                if processed:
+                    st.success(
+                        f"URL file processed successfully: {url_file.name}. "
+                        f"Context: {len(st.session_state.uploaded_file_names)} files / {len(st.session_state.data)} chunks."
+                    )
+                else:
+                    st.error("URL file could not be processed.")
+                if failed:
+                    st.warning("Some URL file content could not be indexed.")
+            except Exception as exc:
+                st.error(
+                    "URL upload failed. If this is a Google Drive link, ensure it is shareable. "
+                    f"Details: {exc}"
+                )
 
     if uploaded_files:
         selected_names = [file.name for file in uploaded_files]
@@ -1692,3 +1833,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
