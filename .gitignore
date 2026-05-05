@@ -26,3 +26,7 @@ dist/
 .DS_Store
 Thumbs.db
 .vscode/*.code-workspace
+
+# Local RAG artifacts
+data/
+faiss_index/
