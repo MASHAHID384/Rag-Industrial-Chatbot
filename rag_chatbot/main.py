@@ -1296,6 +1296,24 @@ def get_upload_signature(uploaded_files) -> tuple[str, ...]:
     return tuple(sorted(signature))
 
 
+def is_mobile_client() -> bool:
+    try:
+        user_agent = str(st.context.headers.get("user-agent", "")).lower()
+    except Exception:
+        user_agent = ""
+
+    mobile_markers = [
+        "android",
+        "iphone",
+        "ipad",
+        "ipod",
+        "mobile",
+        "opera mini",
+        "windows phone",
+    ]
+    return any(marker in user_agent for marker in mobile_markers)
+
+
 def process_uploaded_files(uploaded_files) -> tuple[int, int]:
     incoming_chunks: List[Dict] = []
     processed = 0
@@ -1468,6 +1486,7 @@ def main() -> None:
 
     st.markdown('<div class="upload-panel">', unsafe_allow_html=True)
     control_left, control_right = st.columns([1, 2])
+    mobile_client = is_mobile_client()
     with control_left:
         answer_style = st.selectbox(
             "Answer style",
@@ -1475,12 +1494,24 @@ def main() -> None:
             help="Choose how the assistant should format responses.",
         )
     with control_right:
-        uploaded_files = st.file_uploader(
-            "📂 Drag and drop files here or browse files",
-            type=SUPPORTED_TYPES,
-            accept_multiple_files=True,
-            help="Supported: PDF, TXT, XML, DOCX, JSON, CSV",
-        )
+        if mobile_client:
+            st.caption("Mobile upload mode: upload one file at a time for best reliability.")
+            uploaded_single = st.file_uploader(
+                "📂 Tap to browse files",
+                type=SUPPORTED_TYPES,
+                accept_multiple_files=False,
+                help="Mobile tip: use English file names and upload one file at a time.",
+                key="mobile_file_uploader",
+            )
+            uploaded_files = [uploaded_single] if uploaded_single else []
+        else:
+            uploaded_files = st.file_uploader(
+                "📂 Drag and drop files here or browse files",
+                type=SUPPORTED_TYPES,
+                accept_multiple_files=True,
+                help="Supported: PDF, TXT, XML, DOCX, JSON, CSV",
+                key="desktop_file_uploader",
+            )
 
     upload_signature = get_upload_signature(uploaded_files)
     if upload_signature and upload_signature != st.session_state.last_upload_signature:
