@@ -927,6 +927,18 @@ def is_low_quality_fragment(text: str) -> bool:
     return False
 
 
+def is_informative_chunk(text: str) -> bool:
+    value = re.sub(r"\s+", " ", (text or "")).strip()
+    if len(value) < 35:
+        return False
+    lowered = value.lower()
+    html_markers = ["<html", "<head", "<body", "google drive", "doctype html", "enable javascript"]
+    if any(marker in lowered for marker in html_markers):
+        return False
+    letters = sum(1 for ch in value if ch.isalpha())
+    return letters >= 18
+
+
 def format_answer_by_style(answer: str, style: str) -> str:
     text = (answer or "").strip()
     if not text:
@@ -1343,6 +1355,15 @@ def _content_type_to_ext(content_type: str) -> str:
     return ""
 
 
+def _is_html_payload(payload: bytes, content_type: str) -> bool:
+    ct = (content_type or "").lower()
+    if "text/html" in ct:
+        return True
+    sample = payload[:1200].decode("utf-8", "ignore").lower()
+    html_tokens = ["<!doctype html", "<html", "<head", "<body", "google drive", "enable javascript"]
+    return any(token in sample for token in html_tokens)
+
+
 def download_url_as_file(raw_url: str):
     if not raw_url or not raw_url.strip():
         raise ValueError("Please paste a valid file URL.")
@@ -1375,6 +1396,13 @@ def download_url_as_file(raw_url: str):
 
     file_name = _filename_from_headers_or_url(download_url, headers)
     ext = Path(file_name).suffix.lower().replace(".", "").strip()
+
+    if _is_html_payload(payload, content_type):
+        raise ValueError(
+            "The URL returned a web page instead of a real document file. "
+            "For Google Drive, open share settings and allow link access, then try again."
+        )
+
     if ext not in SUPPORTED_TYPES:
         guessed_ext = _content_type_to_ext(content_type)
         if guessed_ext:
@@ -1385,6 +1413,11 @@ def download_url_as_file(raw_url: str):
     if ext not in SUPPORTED_TYPES:
         raise ValueError(
             f"Unsupported URL file type. Allowed types: {', '.join(SUPPORTED_TYPES).upper()}."
+        )
+
+    if ext == "pdf" and not payload.startswith(b"%PDF"):
+        raise ValueError(
+            "Downloaded file is not a valid PDF binary. Please use a direct downloadable document link."
         )
 
     file_obj = io.BytesIO(payload)
@@ -1429,6 +1462,7 @@ def process_uploaded_files(uploaded_files) -> tuple[int, int]:
     for file in uploaded_files or []:
         file.seek(0)
         chunks = load_uploaded_file(file)
+        chunks = [chunk for chunk in chunks if is_informative_chunk(str(chunk.get("text", "")))]
         if chunks:
             incoming_chunks.extend(chunks)
             processed += 1
@@ -1684,7 +1718,7 @@ def main() -> None:
                     st.warning("Some URL file content could not be indexed.")
             except Exception as exc:
                 st.error(
-                    "URL upload failed. If this is a Google Drive link, ensure it is shareable. "
+                    "URL upload failed. If this is a Google Drive link, ensure it is shareable and direct-download capable. "
                     f"Details: {exc}"
                 )
 
