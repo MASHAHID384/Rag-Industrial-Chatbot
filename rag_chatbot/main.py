@@ -1495,8 +1495,13 @@ def main() -> None:
             ALLOWED_ANSWER_STYLES,
             help="Choose how the assistant should format responses.",
         )
+        safe_mobile_mode = st.toggle(
+            "Safe mobile upload mode",
+            value=mobile_client,
+            help="Enable this on mobile Chrome to upload one file at a time with higher reliability.",
+        )
     with control_right:
-        if mobile_client:
+        if safe_mobile_mode:
             st.caption("Mobile upload mode: upload one file at a time for best reliability.")
             st.caption("Chrome tip: pick files from Downloads/Files, and keep filename in English.")
             uploaded_single = st.file_uploader(
@@ -1538,7 +1543,7 @@ def main() -> None:
             )
         # Reset mobile uploader after each processing cycle to avoid
         # stuck/error UI state in some Android Chrome sessions.
-        if mobile_client and processed > 0:
+        if safe_mobile_mode and processed > 0:
             st.session_state.mobile_uploader_nonce += 1
             st.rerun()
 
