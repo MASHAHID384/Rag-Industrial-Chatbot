@@ -1,9 +1,6 @@
 ﻿# AI Powered Multi Doc Conversational Chatbot Using RAG
 
-## 🎯 Project Purpose
-This project is built to make document understanding faster and easier through conversational AI. It allows users to upload multiple documents, retrieve relevant context, and get grounded answers in different response styles. The goal is to provide a practical, deployable RAG chatbot experience for real-world academic and professional use.
-
-## 1) ✨ Features
+## ✨ Features
 - Multi-document chat over PDF, DOCX, TXT, CSV, JSON, and XML files.
 - Auto file processing and chunk indexing for fast retrieval.
 - Multiple answer styles: Detailed, Short, Bullet Points, Professional.
@@ -11,7 +8,7 @@ This project is built to make document understanding faster and easier through c
 - Numeric dashboard with API, file, and query metrics.
 - Public cloud deployment with secure API key through secrets.
 
-## 2) 🔄 Pipeline
+## 🔄 Pipeline
 1. Ingest: Upload local files or add document URL.
 2. Parse: Extract text from supported document formats.
 3. Chunk: Split content into retrieval-ready chunks.
@@ -20,7 +17,7 @@ This project is built to make document understanding faster and easier through c
 6. Generate: Build prompt and generate response with Gemini.
 7. Format: Clean, deduplicate, and style output response.
 
-## 3) 🧰 Technology Used
+## 🧰 Technology Used
 - Python
 - Streamlit
 - Google Gemini API (`google-genai`)
@@ -32,7 +29,7 @@ This project is built to make document understanding faster and easier through c
 - GitHub
 - Streamlit Cloud
 
-## 4) 🗂️ Project Structure
+## 🗂️ Project Structure
 ```text
 chatbot-project/
   app.py
@@ -47,7 +44,7 @@ chatbot-project/
     ci.yml
 ```
 
-## 5) 🚀 Quickstart (How I Run This Project)
+## 🚀 Quickstart
 1. Open terminal in project root.
 2. Activate virtual environment.
 3. Set API key:
